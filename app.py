@@ -3,8 +3,7 @@ import pandas as pd
 import datetime
 from fpdf import FPDF
 import io
-import os
-import urllib.request
+import math
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
@@ -42,47 +41,40 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- PDF作成用関数 ---
+# --- PDF作成用関数 (標準フォント・SKU表記) ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
-    
-    font_path = "NotoSansJP-Regular.ttf"
-    if not os.path.exists(font_path):
-        url = "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP-Regular.ttf"
-        urllib.request.urlretrieve(url, font_path)
-        
-    pdf.add_font("NotoSansJP", "", font_path)
-    
-    pdf.set_font("NotoSansJP", "", 16)
-    pdf.cell(0, 10, "rubyohoto 収支・時間レポート", ln=True, align='C')
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "rubyohoto Profit & Time Report", ln=True, align='C')
     pdf.ln(10)
     
-    # 総合利益のえぐいフォーマット
-    total_prof_str = f"+{int(profit):,} 円" if profit > 0 else f"-{abs(int(profit)):,} 円" if profit < 0 else "0 円"
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(0, 10, f"Total Adj Time: {adj_time:+.1f} h", ln=True)
     
-    pdf.set_font("NotoSansJP", "", 12)
-    pdf.cell(0, 10, f"合計調整時間: {adj_time:+.1f} h", ln=True)
-    pdf.cell(0, 10, f"総売上: {int(sales):,} 円 / 総人件費: {int(cost):,} 円 / 合計利益: {total_prof_str}", ln=True)
+    prof_str = f"+{int(profit):,}" if profit >= 0 else f"-{abs(int(profit)):,}"
+    pdf.cell(0, 10, f"Sales: {int(sales):,} / Cost: {int(cost):,} / Profit: {prof_str}", ln=True)
     pdf.ln(10)
     
-    pdf.set_font("NotoSansJP", "", 10)
-    pdf.cell(25, 10, "氏名", 1); pdf.cell(20, 10, "実績/目標", 1); pdf.cell(15, 10, "達成率", 1)
-    pdf.cell(20, 10, "調整", 1); pdf.cell(25, 10, "売上", 1); pdf.cell(25, 10, "人件費", 1)
-    pdf.cell(25, 10, "利益", 1); pdf.ln()
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(25, 10, "Name", 1); pdf.cell(25, 10, "SKU(Act/Tgt)", 1); pdf.cell(15, 10, "Rate", 1)
+    pdf.cell(20, 10, "AdjT", 1); pdf.cell(30, 10, "Sales", 1); pdf.cell(30, 10, "Cost", 1); pdf.cell(30, 10, "Profit", 1); pdf.ln()
+    
+    pdf.set_font("Helvetica", "", 9)
+    name_map = {"森さん": "Mori", "宇田さん": "Uda", "三沖さん": "Mioki", "野澤さん": "Nozawa"}
     
     for _, row in df.iterrows():
-        # 個別利益のえぐいフォーマット
-        row_prof = int(row['利益'])
-        prof_str = f"+{row_prof:,}円" if row_prof > 0 else f"-{abs(row_prof):,}円" if row_prof < 0 else "0円"
-        
-        pdf.cell(25, 10, str(row['氏名']), 1)
-        pdf.cell(20, 10, f"{int(row['実績SKU'])} / {int(row['目標合計'])}", 1)
+        en_name = name_map.get(row['氏名'], "Staff")
+        pdf.cell(25, 10, en_name, 1)
+        pdf.cell(25, 10, f"{int(row['実績SKU'])} / {int(row['目標SKU合計'])}", 1)
         pdf.cell(15, 10, str(row['達成率']), 1)
         pdf.cell(20, 10, f"{row['調整時間']:+.1f}h", 1)
-        pdf.cell(25, 10, f"{int(row['売上']):,}", 1)
-        pdf.cell(25, 10, f"{int(row['人件費']):,}", 1)
-        pdf.cell(25, 10, prof_str, 1); pdf.ln()
+        pdf.cell(30, 10, f"{int(row['売上']):,}", 1)
+        pdf.cell(30, 10, f"{int(row['人件費']):,}", 1)
+        
+        r_prof = int(row['利益'])
+        r_prof_s = f"+{r_prof:,}" if r_prof >= 0 else f"-{abs(r_prof):,}"
+        pdf.cell(30, 10, r_prof_s, 1); pdf.ln()
         
     return pdf.output()
 
@@ -120,13 +112,14 @@ with tab1:
     
     final['人件費'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['人件費']
-
-    final['目標合計'] = final['目標SKU'] * final['シフト日数']
-    final['SKU差分'] = final['実績SKU'] - final['目標合計']
+    
+    # ★「着」ではなく「SKU」として計算・表示
+    final['目標SKU合計'] = final['目標SKU'] * final['シフト日数']
+    final['SKU差分'] = final['実績SKU'] - final['目標SKU合計']
     
     def calc_achievement(row):
-        if row['目標合計'] > 0:
-            return f"{(row['実績SKU'] / row['目標合計']) * 100:.1f}%"
+        if row['目標SKU合計'] > 0:
+            return f"{(row['実績SKU'] / row['目標SKU合計']) * 100:.1f}%"
         return "0.0%"
     final['達成率'] = final.apply(calc_achievement, axis=1)
 
@@ -135,43 +128,39 @@ with tab1:
 
     total_adj = shift_summary['調整時間'].sum()
     total_shifts = shift_summary['シフト日数'].sum()
-
-    # ★ えぐい表示（プラスマイナス強調）用の変数
     t_prof = int(final['利益'].sum())
     t_prof_str = f"+¥{t_prof:,}" if t_prof > 0 else f"-¥{abs(t_prof):,}" if t_prof < 0 else "¥0"
 
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("総売上 (請求額)", f"¥{int(final['売上金額'].sum()):,}")
-    m2.metric("総人件費 (コスト)", f"¥{int(final['人件費'].sum()):,}")
-    m3.metric("合計利益", t_prof_str) # トップのパネルもえぐい表示に
+    m1.metric("総売上", f"¥{int(final['売上金額'].sum()):,}")
+    m2.metric("総人件費", f"¥{int(final['人件費'].sum()):,}")
+    m3.metric("合計利益", t_prof_str)
     m4.metric("合計シフト", f"{total_shifts}日")
     m5.metric("合計調整時間", f"{total_adj:+.1f}h", delta=total_adj)
 
     st.divider()
-    
     st.subheader("💰 利益分布")
     chart_df = final[['氏名', '利益']].copy()
     chart_df['グラフ色'] = chart_df['利益'].apply(lambda x: '#FF4B4B' if x < 0 else '#0068C9')
     st.bar_chart(chart_df, x='氏名', y='利益', color='グラフ色')
 
     st.subheader("📋 詳細レポートテーブル")
-    disp_df = final[['氏名', '実績SKU', '目標合計', 'SKU差分', '達成率', 'シフト日数', '調整時間', '売上金額', '人件費', '利益']].rename(columns={'売上金額':'売上'})
+    # ★ カラム名も「目標SKU合計」などに変更
+    disp_df = final[['氏名', '実績SKU', '目標SKU合計', 'SKU差分', '達成率', 'シフト日数', '調整時間', '売上金額', '人件費', '利益']].rename(columns={'売上金額':'売上'})
     
-    # ★ テーブル内の利益も「-¥3,000」と直感的に見えるようにカスタムフォーマット
     st.dataframe(disp_df.style.format({
         "売上": "¥{:,.0f}",
         "人件費": "¥{:,.0f}",
         "利益": lambda x: f"+¥{int(x):,}" if x > 0 else (f"-¥{abs(int(x)):,}" if x < 0 else "¥0"), 
         "調整時間": "{:+.1f}h", 
-        "実績SKU": "{:.0f}",
-        "目標合計": "{:.0f}",
-        "SKU差分": "{:+.0f}"
+        "実績SKU": "{:.0f} SKU",
+        "目標SKU合計": "{:.0f} SKU",
+        "SKU差分": "{:+.0f} SKU"
     }), use_container_width=True, hide_index=True)
 
     if st.button("📄 レポートをPDFで保存"):
-        pdf_bytes = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
-        st.download_button("📥 PDFダウンロード", pdf_bytes, f"report_{datetime.date.today()}.pdf", "application/pdf")
-
+        pdf_output = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
+        st.download_button("📥 PDFダウンロード", pdf_output, f"report_{datetime.date.today()}.pdf", "application/pdf")
 
 # --- タブ2：実績入力 ---
 with tab2:
@@ -189,7 +178,7 @@ with tab2:
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v16", use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v18", use_container_width=True
     )
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
@@ -203,7 +192,7 @@ with tab2:
         i_date = c1.date_input("撮影日")
         i_name = c2.selectbox("カメラマン", name_order)
         in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist())
-        i_sku = c4.number_input("SKU数", min_value=0, step=1)
+        i_sku = c4.number_input("実績SKU", min_value=0, step=1)
         i_cut = c5.number_input("総カット数", min_value=0, step=1)
         
         if st.button("実績を追加保存", use_container_width=True):
@@ -214,7 +203,7 @@ with tab2:
 
     st.write("▼ 実績リスト")
     st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v16",
+        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v18",
         column_config={
             "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
             "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
@@ -226,7 +215,7 @@ with tab2:
 # --- タブ3：設定 ---
 with tab3:
     ca, cb = st.columns(2)
-    ca.subheader("👥 氏名・日給設定 (目標SKUを設定)")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v16")
+    ca.subheader("👥 氏名・日給設定")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v18")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v16")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v18")
