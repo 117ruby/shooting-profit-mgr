@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import datetime
+from fpdf import FPDF
+import io
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
@@ -27,24 +29,15 @@ if 'b_df' not in st.session_state:
 
 if 'shift_df' not in st.session_state:
     st.session_state.shift_df = pd.DataFrame([
-        {"名前": "森さん", "期間": "2026/05 第1期", "シフト日数": 6, "合計時間": 0.0, "調整時間": -2.0, "交通費": 816},
-        {"名前": "宇田さん", "期間": "2026/05 第1期", "シフト日数": 4, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0},
-        {"名前": "三沖さん", "期間": "2026/05 第1期", "シフト日数": 3, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0},
-        {"名前": "野澤さん", "期間": "2026/05 第1期", "シフト日数": 1, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0}
+        {"名前": "森さん", "期間": "2026/05 第1期", "シフト日数": 6, "合計時間": 48.0, "調整時間": 0.0, "交通費": 816},
+        {"名前": "宇田さん", "期間": "2026/05 第1期", "シフト日数": 4, "合計時間": 32.0, "調整時間": 0.0, "交通費": 0},
+        {"名前": "三沖さん", "期間": "2026/05 第1期", "シフト日数": 3, "合計時間": 24.0, "調整時間": 0.0, "交通費": 0},
+        {"名前": "野澤さん", "期間": "2026/05 第1期", "シフト日数": 1, "合計時間": 8.0, "調整時間": 0.0, "交通費": 0}
     ])
 
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- ★ データ保護処理 (Noneをゼロに変換) ---
-def sanitize_shift_data():
-    for col in ['シフト日数', '調整時間', '交通費']:
-        st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
-    # 合計時間を再計算 (1シフト=8時間)
-    st.session_state.shift_df['合計時間'] = (st.session_state.shift_df['シフト日数'] * 8.0) + st.session_state.shift_df['調整時間']
-
-# 初回・再読み込み時に必ずクリーンアップ
-sanitize_shift_data()
 
 # --- 2. 画面構成 ---
 st.title("📸 rubyohoto 撮影収支管理")
@@ -110,19 +103,29 @@ with tab2:
     st.divider()
 
     st.subheader("❶ シフト・コスト設定")
-    # 入力を受け付けた後、すぐにNoneを取り除く処理を走らせるための関数
-    def on_shift_change():
-        sanitize_shift_data()
-
-    st.session_state.shift_df = st.data_editor(
+    
+    # ユーザーの入力を一旦別の変数（edited_shift）で受け取る
+    edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
         disabled=["合計時間"], 
         hide_index=True, 
         key="sh_tab2_auto",
-        on_change=on_shift_change,
         use_container_width=True
     )
+
+    # ★ 変更があった瞬間に即座に再計算して画面をリロードする絶対防御ロジック
+    edit_cols = ["名前", "期間", "シフト日数", "調整時間", "交通費"]
+    if not edited_shift[edit_cols].equals(st.session_state.shift_df[edit_cols]):
+        for col in ['シフト日数', '調整時間', '交通費']:
+            edited_shift[col] = pd.to_numeric(edited_shift[col], errors='coerce').fillna(0)
+        # 8時間計算を強制実行
+        edited_shift['合計時間'] = (edited_shift['シフト日数'] * 8.0) + edited_shift['調整時間']
+        
+        # データを更新して強制リロード
+        st.session_state.shift_df = edited_shift
+        st.rerun()
+
     
     st.divider()
     st.subheader("❷ 撮影実績入力")
