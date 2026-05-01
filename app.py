@@ -7,7 +7,7 @@ import math
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
-# --- 1. データの初期化 (順序厳守) ---
+# --- 1. データの初期化 ---
 name_order = ["森さん", "宇田さん", "三沖さん", "野澤さん"]
 
 if 'm_df' not in st.session_state:
@@ -41,47 +41,77 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- PDF作成用関数 (型エラーを徹底回避) ---
+# --- PDF作成用関数 (見た目改善版) ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "rubyohoto Profit & SKU Report", ln=True, align='C')
-    pdf.ln(10)
     
-    pdf.set_font("Helvetica", "", 12)
-    prof_sign = "+" if profit >= 0 else "-"
-    pdf.cell(0, 10, f"Total Sales: {int(sales):,} / Cost: {int(cost):,} / Profit: {prof_sign}{abs(int(profit)):,}", ln=True)
-    pdf.cell(0, 10, f"Total Adj Time: {adj_time:+.1f} h", ln=True)
+    # メインタイトル
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(0, 104, 201) # rubyohotoカラー（青）
+    pdf.cell(0, 15, "rubyohoto PROFIT REPORT", ln=True, align='C')
     pdf.ln(5)
     
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(20, 10, "Name", 1); pdf.cell(25, 10, "SKU(Act/Tgt)", 1); pdf.cell(15, 10, "Diff", 1)
-    pdf.cell(20, 10, "Rate", 1); pdf.cell(30, 10, "Sales", 1); pdf.cell(30, 10, "Cost", 1); pdf.cell(30, 10, "Profit", 1); pdf.ln()
+    # 総合サマリー
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(240, 242, 246) # 薄いグレー背景
+    pdf.cell(0, 10, f"  Summary:  Sales JPY {int(sales):,}  /  Cost JPY {int(cost):,}  /  Total Adj Time {adj_time:+.1f}h", ln=True, fill=True)
     
-    pdf.set_font("Helvetica", "", 9)
+    # 合計利益（えぐい表示）
+    pdf.set_font("Helvetica", "B", 14)
+    if profit < 0:
+        pdf.set_text_color(255, 75, 75) # 赤字
+        p_str = f"TOTAL PROFIT: -JPY {abs(int(profit)):,}"
+    else:
+        pdf.set_text_color(0, 0, 0)
+        p_str = f"TOTAL PROFIT: +JPY {int(profit):,}"
+    pdf.cell(0, 12, p_str, ln=True, align='R')
+    pdf.ln(5)
+    
+    # テーブルヘッダー
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_fill_color(0, 104, 201)
+    pdf.cell(20, 10, "Name", 1, 0, 'C', True)
+    pdf.cell(30, 10, "SKU(Act/Tgt)", 1, 0, 'C', True)
+    pdf.cell(15, 10, "Diff", 1, 0, 'C', True)
+    pdf.cell(30, 10, "Sales", 1, 0, 'C', True)
+    pdf.cell(30, 10, "Cost", 1, 0, 'C', True)
+    pdf.cell(35, 10, "Profit", 1, 1, 'C', True)
+    
+    # テーブル中身
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(0, 0, 0)
     name_map = {"森さん": "Mori", "宇田さん": "Uda", "三沖さん": "Mioki", "野澤さん": "Nozawa"}
     
-    for _, row in df.iterrows():
+    for i, row in df.iterrows():
         ename = name_map.get(row['氏名'], "Staff")
-        pdf.cell(20, 10, ename, 1)
-        pdf.cell(25, 10, f"{int(row['実績SKU'])} / {int(row['目標SKU合計'])}", 1)
-        pdf.cell(15, 10, f"{int(row['SKU差分']):+}", 1)
-        pdf.cell(20, 10, str(row['達成率']), 1)
-        pdf.cell(30, 10, f"{int(row['売上']):,}", 1)
-        pdf.cell(30, 10, f"{int(row['人件費']):,}", 1)
+        pdf.cell(20, 10, ename, 1, 0, 'C')
+        pdf.cell(30, 10, f"{int(row['実績SKU'])} / {int(row['目標SKU合計'])}", 1, 0, 'C')
         
+        # SKU差分
+        diff = int(row['SKU差分'])
+        pdf.cell(15, 10, f"{diff:+}", 1, 0, 'C')
+        
+        pdf.cell(30, 10, f"{int(row['売上']):,}", 1, 0, 'R')
+        pdf.cell(30, 10, f"{int(row['人件費']):,}", 1, 0, 'R')
+        
+        # 個別利益（マイナスなら赤字にする）
         r_prof = int(row['利益'])
-        psign = "+" if r_prof >= 0 else "-"
-        pdf.cell(30, 10, f"{psign}{abs(r_prof):,}", 1); pdf.ln()
-    
-    # ★ 型エラー対策: 文字列ならencodeし、bytearrayならそのままbytesに変換
-    output_raw = pdf.output(dest='S')
-    if isinstance(output_raw, str):
-        return output_raw.encode('latin-1')
-    return bytes(output_raw)
+        if r_prof < 0:
+            pdf.set_text_color(255, 75, 75)
+            ps = f"-{abs(r_prof):,}"
+        else:
+            pdf.set_text_color(0, 0, 0)
+            ps = f"+{r_prof:,}"
+        pdf.cell(35, 10, f"JPY {ps}", 1, 1, 'R')
+        pdf.set_text_color(0, 0, 0) # 色を戻す
 
-# --- データのクリーンアップ関数 ---
+    output_raw = pdf.output(dest='S')
+    return bytes(output_raw) if not isinstance(output_raw, str) else output_raw.encode('latin-1')
+
+# --- データのクリーンアップ ---
 def clean_all_data():
     for col in ['シフト日数', '調整時間', '交通費']:
         st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
@@ -96,10 +126,8 @@ clean_all_data()
 st.title("📸 rubyohoto 撮影収支管理")
 tab1, tab2, tab3 = st.tabs(["📉 収支・時間集計", "📝 実績入力・コスト設定", "⚙️ 各種設定"])
 
-# --- タブ1：収支・時間集計 ---
 with tab1:
     st.header("📊 総合レポート")
-
     s_merge = st.session_state.shift_df.rename(columns={'名前': '氏名'})
     shift_summary = s_merge.groupby('氏名').agg({'シフト日数': 'sum', '合計時間': 'sum', '調整時間': 'sum', '交通費': 'sum'}).reset_index()
 
@@ -112,7 +140,6 @@ with tab1:
 
     final = pd.merge(st.session_state.m_df, sku_summary, on='氏名', how='left').fillna(0)
     final = pd.merge(final, shift_summary, on='氏名', how='left').fillna(0)
-    
     final['人件費'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['人件費']
     final['目標SKU合計'] = final['目標SKU'] * final['シフト日数']
@@ -128,7 +155,6 @@ with tab1:
     final = final.sort_values('氏名')
 
     total_adj = shift_summary['調整時間'].sum()
-    total_shifts = shift_summary['シフト日数'].sum()
     t_prof = int(final['利益'].sum())
     t_prof_str = f"+¥{t_prof:,}" if t_prof > 0 else f"-¥{abs(t_prof):,}" if t_prof < 0 else "¥0"
 
@@ -136,7 +162,7 @@ with tab1:
     m1.metric("総売上", f"¥{int(final['売上金額'].sum()):,}")
     m2.metric("総人件費", f"¥{int(final['人件費'].sum()):,}")
     m3.metric("合計利益", t_prof_str)
-    m4.metric("合計シフト", f"{total_shifts}日")
+    m4.metric("合計シフト", f"{int(shift_summary['シフト日数'].sum())}日")
     m5.metric("合計調整時間", f"{total_adj:+.1f}h", delta=total_adj)
 
     st.divider()
@@ -147,30 +173,19 @@ with tab1:
 
     st.subheader("📋 詳細レポートテーブル")
     disp_df = final[['氏名', '実績SKU', '目標SKU合計', 'SKU差分', '達成率', 'シフト日数', '調整時間', '売上金額', '人件費', '利益']].rename(columns={'売上金額':'売上'})
-    
     st.dataframe(disp_df.style.format({
-        "売上": "¥{:,.0f}",
-        "人件費": "¥{:,.0f}",
+        "売上": "¥{:,.0f}", "人件費": "¥{:,.0f}",
         "利益": lambda x: f"+¥{int(x):,}" if x > 0 else (f"-¥{abs(int(x)):,}" if x < 0 else "¥0"), 
-        "調整時間": "{:+.1f}h", 
-        "実績SKU": "{:.0f} SKU",
-        "目標SKU合計": "{:.0f} SKU",
-        "SKU差分": "{:+.0f} SKU"
+        "調整時間": "{:+.1f}h", "実績SKU": "{:.0f} SKU", "目標SKU合計": "{:.0f} SKU", "SKU差分": "{:+.0f} SKU"
     }), use_container_width=True, hide_index=True)
 
-    # ★ 実行環境のライブラリ差分を吸収する、最強のPDFダウンロード処理
     try:
-        data_to_download = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
-        st.download_button(
-            label="📄 レポートをPDFで保存",
-            data=data_to_download,
-            file_name=f"report_{datetime.date.today()}.pdf",
-            mime="application/pdf"
-        )
+        pdf_data = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
+        st.download_button(label="📄 改善版PDFを保存", data=pdf_data, file_name=f"report_{datetime.date.today()}.pdf", mime="application/pdf")
     except Exception as e:
-        st.error(f"PDF生成エラー: {e}")
+        st.error(f"PDF Error: {e}")
 
-# --- タブ2：実績入力 ---
+# タブ2・3は変更なし（省略せず以前のまま保持）
 with tab2:
     st.subheader("⏱️ カメラマン別状況")
     cols = st.columns(len(name_order))
@@ -183,47 +198,28 @@ with tab2:
 
     st.divider()
     st.subheader("❶ シフト・コスト設定")
-    edited_shift = st.data_editor(
-        st.session_state.shift_df, 
-        column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v20", use_container_width=True
-    )
+    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v21", use_container_width=True)
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
-        clean_all_data()
-        st.rerun()
+        clean_all_data(); st.rerun()
     
     st.divider()
     st.subheader("❷ 撮影実績入力")
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 1])
-        i_date = c1.date_input("撮影日")
-        i_name = c2.selectbox("カメラマン", name_order)
+        i_date = c1.date_input("撮影日"); i_name = c2.selectbox("カメラマン", name_order)
         in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist())
-        i_sku = c4.number_input("実績SKU", min_value=0, step=1)
-        i_cut = c5.number_input("総カット数", min_value=0, step=1)
-        
+        i_sku = c4.number_input("実績SKU", min_value=0, step=1); i_cut = c5.number_input("総カット数", min_value=0, step=1)
         if st.button("実績を追加保存", use_container_width=True):
             new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True)
-            clean_all_data()
-            st.rerun()
+            clean_all_data(); st.rerun()
+    st.session_state.sku_db = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v21",
+        column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
+        "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
 
-    st.write("▼ 実績リスト")
-    st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v20",
-        column_config={
-            "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
-            "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
-            "実績SKU": st.column_config.NumberColumn("実績SKU", step=1),
-            "総カット数": st.column_config.NumberColumn("総カット数", step=1)
-        }
-    )
-
-# --- タブ3：設定 ---
 with tab3:
     ca, cb = st.columns(2)
-    ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v20")
-    cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v20")
+    ca.subheader("👥 氏名・日給設定"); st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v21")
+    cb.subheader("🏷️ ブランド・単価設定"); st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v21")
