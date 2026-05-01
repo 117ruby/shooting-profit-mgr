@@ -6,7 +6,7 @@ import datetime
 
 st.set_page_config(page_title="rubyohoto 収支管理", layout="wide")
 
-# --- 設定：あなたのスプレッドシートURL ---
+# --- 設定：共有いただいたスプレッドシートのURL ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1cEb3xBs1YcrmanfCkDOWtIpHddC6AdOWqkDLcNgLzJM/edit?usp=sharing"
 
 # 接続設定
@@ -14,10 +14,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_df(worksheet):
     try:
-        # 最新データを取得（ttl=0でキャッシュ無効化）
+        # 最新データを取得
         return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl="0s")
     except Exception as e:
-        st.error(f"シート '{worksheet}' の読み込みに失敗しました。シート名が半角小文字か確認してください。")
+        st.error(f"シート '{worksheet}' の読み込みに失敗しました。1行目に項目名が入っているか確認してください。")
         return pd.DataFrame()
 
 # 1. カメラマン固定（マスタ）
@@ -41,7 +41,6 @@ month_focus = st.sidebar.selectbox("対象月", ["2026/05", "2026/06", "2026/07"
 period_focus = st.sidebar.radio("期間区分", ["第1期 (1-20日)", "第2期 (21-末日)"])
 full_p_label = f"{month_focus} {period_focus}"
 
-# ここが「3つのタブ」を作る大事な部分です！
 tab1, tab2, tab3 = st.tabs(["📉 収支分析", "📝 実績入力", "⚙️ 設定"])
 
 # --- タブ1：収支分析 ---
@@ -89,6 +88,7 @@ with tab2:
         
         if st.form_submit_button("スプレッドシートへ保存"):
             new_data = pd.DataFrame([{"日付": str(d_date), "氏名": d_name, "ブランド": d_brand, "実績SKU": d_sku}])
+            # 既存データと結合して上書き保存
             updated_df = pd.concat([sku_db, new_data], ignore_index=True)
             conn.update(spreadsheet=SHEET_URL, worksheet="sku", data=updated_df)
             st.success("スプレッドシートに保存しました！")
@@ -96,7 +96,7 @@ with tab2:
 
     if not sku_db.empty:
         st.divider()
-        st.write("▼ 登録済みデータの修正（一括更新ボタンで保存）")
+        st.write("▼ 登録済みデータ（修正して保存ボタンで反映）")
         ed_sku = st.data_editor(sku_db, num_rows="dynamic", use_container_width=True)
         if st.button("実績データを一括更新"):
             conn.update(spreadsheet=SHEET_URL, worksheet="sku", data=ed_sku)
@@ -104,7 +104,7 @@ with tab2:
 
 # --- タブ3：設定 ---
 with tab3:
-    st.subheader("カメラマン単価・目標設定")
+    st.subheader("カメラマン単価設定")
     ed_m = st.data_editor(m_df, hide_index=True)
     if st.button("マスター情報を保存"):
         conn.update(spreadsheet=SHEET_URL, worksheet="master", data=ed_m)
