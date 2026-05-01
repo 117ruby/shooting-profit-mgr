@@ -3,6 +3,8 @@ import pandas as pd
 import datetime
 from fpdf import FPDF
 import io
+import os
+import urllib.request
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
@@ -40,25 +42,41 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- PDF作成用関数 ---
+# --- ★ 日本語対応のPDF作成関数 ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "rubyohoto Profit & Time Report", ln=True, align='C')
+    
+    # 日本語フォントを自動ダウンロードして設定
+    font_path = "NotoSansJP-Regular.ttf"
+    if not os.path.exists(font_path):
+        url = "https://github.com/google/fonts/raw/main/ofl/notosansjp/NotoSansJP-Regular.ttf"
+        urllib.request.urlretrieve(url, font_path)
+        
+    pdf.add_font("NotoSansJP", "", font_path)
+    
+    pdf.set_font("NotoSansJP", "", 16)
+    pdf.cell(0, 10, "rubyohoto 収支・時間レポート", ln=True, align='C')
     pdf.ln(10)
-    pdf.set_font("Helvetica", "", 12)
-    pdf.cell(0, 10, f"Total Adj Time: {adj_time:+.1f} h", ln=True)
-    pdf.cell(0, 10, f"Total Sales: {int(sales):,} JPY / Total Profit: {int(profit):,} JPY", ln=True)
+    
+    pdf.set_font("NotoSansJP", "", 12)
+    pdf.cell(0, 10, f"合計調整時間: {adj_time:+.1f} h", ln=True)
+    pdf.cell(0, 10, f"総売上: {int(sales):,} 円 / 合計利益: {int(profit):,} 円", ln=True)
     pdf.ln(10)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(35, 10, "Name", 1); pdf.cell(20, 10, "SKU", 1); pdf.cell(25, 10, "AdjT", 1)
-    pdf.cell(35, 10, "Sales", 1); pdf.cell(35, 10, "Profit", 1); pdf.ln()
-    pdf.set_font("Helvetica", "", 10)
+    
+    # テーブルのヘッダー
+    pdf.set_font("NotoSansJP", "", 10)
+    pdf.cell(35, 10, "氏名", 1); pdf.cell(20, 10, "SKU", 1); pdf.cell(25, 10, "調整時間", 1)
+    pdf.cell(35, 10, "売上(円)", 1); pdf.cell(35, 10, "利益(円)", 1); pdf.ln()
+    
+    # テーブルの中身
     for _, row in df.iterrows():
-        pdf.cell(35, 10, str(row['氏名']), 1); pdf.cell(20, 10, str(int(row['実績SKU'])), 1)
-        pdf.cell(25, 10, f"{row['調整時間']:+.1f}", 1)
-        pdf.cell(35, 10, f"{int(row['売上']):,}", 1); pdf.cell(35, 10, f"{int(row['利益']):,}", 1); pdf.ln()
+        pdf.cell(35, 10, str(row['氏名']), 1)
+        pdf.cell(20, 10, str(int(row['実績SKU'])), 1)
+        pdf.cell(25, 10, f"{row['調整時間']:+.1f}h", 1)
+        pdf.cell(35, 10, f"{int(row['売上']):,}", 1)
+        pdf.cell(35, 10, f"{int(row['利益']):,}", 1); pdf.ln()
+        
     return pdf.output()
 
 # --- データのクリーンアップ関数 ---
@@ -68,7 +86,6 @@ def clean_all_data():
     st.session_state.shift_df['合計時間'] = (st.session_state.shift_df['シフト日数'] * 8.0) + st.session_state.shift_df['調整時間']
     if not st.session_state.sku_db.empty:
         for col in ['実績SKU', '総カット数']:
-            # ★ ここで整数（int）に強制変換して小数点を消す
             st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
 
 clean_all_data()
@@ -115,7 +132,6 @@ with tab1:
     st.subheader("📋 詳細レポートテーブル")
     disp_df = final[['氏名', '実績SKU', '総カット数', 'シフト日数', '合計時間', '調整時間', '売上金額', '利益']].rename(columns={'売上金額':'売上'})
     
-    # ★ ここでも小数点が出ないように表示形式を {:.0f} で完全にロックしました
     st.dataframe(disp_df.style.format({
         "売上": "¥{:,.0f}", 
         "利益": "¥{:,.0f}", 
@@ -146,7 +162,7 @@ with tab2:
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v11", use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v12", use_container_width=True
     )
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
@@ -160,7 +176,6 @@ with tab2:
         i_date = c1.date_input("撮影日")
         i_name = c2.selectbox("カメラマン", name_order)
         in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist())
-        # ★ 入力フォームも整数しか入らないように制限
         i_sku = c4.number_input("SKU数", min_value=0, step=1)
         i_cut = c5.number_input("総カット数", min_value=0, step=1)
         
@@ -172,7 +187,7 @@ with tab2:
 
     st.write("▼ 実績リスト")
     st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v11",
+        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v12",
         column_config={
             "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
             "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
@@ -185,6 +200,6 @@ with tab2:
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v11")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v12")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v11")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v12")
