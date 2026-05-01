@@ -41,28 +41,25 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- ★ PDF作成用関数 (100%エラーが出ない英語マップ版) ---
+# --- PDF作成用関数 (型エラーを徹底回避) ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
-    # 外部フォントを使わず、標準フォントで固める
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, "rubyohoto Profit & SKU Report", ln=True, align='C')
     pdf.ln(10)
     
-    pdf.set_font("Helvetica", "", 11)
+    pdf.set_font("Helvetica", "", 12)
     prof_sign = "+" if profit >= 0 else "-"
     pdf.cell(0, 10, f"Total Sales: {int(sales):,} / Cost: {int(cost):,} / Profit: {prof_sign}{abs(int(profit)):,}", ln=True)
     pdf.cell(0, 10, f"Total Adj Time: {adj_time:+.1f} h", ln=True)
     pdf.ln(5)
     
-    # ヘッダー
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(20, 10, "Name", 1); pdf.cell(25, 10, "SKU(Act/Tgt)", 1); pdf.cell(15, 10, "Diff", 1)
     pdf.cell(20, 10, "Rate", 1); pdf.cell(30, 10, "Sales", 1); pdf.cell(30, 10, "Cost", 1); pdf.cell(30, 10, "Profit", 1); pdf.ln()
     
     pdf.set_font("Helvetica", "", 9)
-    # PDF内だけ英語に変換
     name_map = {"森さん": "Mori", "宇田さん": "Uda", "三沖さん": "Mioki", "野澤さん": "Nozawa"}
     
     for _, row in df.iterrows():
@@ -78,8 +75,11 @@ def create_pdf(df, sales, cost, profit, adj_time):
         psign = "+" if r_prof >= 0 else "-"
         pdf.cell(30, 10, f"{psign}{abs(r_prof):,}", 1); pdf.ln()
     
-    # 確実にbytesで返す
-    return pdf.output(dest='S').encode('latin-1')
+    # ★ 型エラー対策: 文字列ならencodeし、bytearrayならそのままbytesに変換
+    output_raw = pdf.output(dest='S')
+    if isinstance(output_raw, str):
+        return output_raw.encode('latin-1')
+    return bytes(output_raw)
 
 # --- データのクリーンアップ関数 ---
 def clean_all_data():
@@ -158,18 +158,17 @@ with tab1:
         "SKU差分": "{:+.0f} SKU"
     }), use_container_width=True, hide_index=True)
 
-    # ★ 100%バグらないPDFダウンロードボタン
+    # ★ 実行環境のライブラリ差分を吸収する、最強のPDFダウンロード処理
     try:
-        pdf_data = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
+        data_to_download = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), total_adj)
         st.download_button(
             label="📄 レポートをPDFで保存",
-            data=pdf_data,
+            data=data_to_download,
             file_name=f"report_{datetime.date.today()}.pdf",
-            mime="application/pdf",
-            key="pdf_download_btn"
+            mime="application/pdf"
         )
     except Exception as e:
-        st.error(f"PDF生成エラー回避中: {e}")
+        st.error(f"PDF生成エラー: {e}")
 
 # --- タブ2：実績入力 ---
 with tab2:
@@ -187,7 +186,7 @@ with tab2:
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v19", use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v20", use_container_width=True
     )
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
@@ -212,7 +211,7 @@ with tab2:
 
     st.write("▼ 実績リスト")
     st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v19",
+        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v20",
         column_config={
             "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
             "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
@@ -225,6 +224,6 @@ with tab2:
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v19")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v20")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v19")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v20")
