@@ -4,8 +4,7 @@ import datetime
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
-# --- 1. データの初期化 ---
-# ★ 順番をここで完全固定
+# --- 1. データの初期化 (名前の順序を厳守) ---
 name_order = ["森さん", "宇田さん", "三沖さん", "野澤さん"]
 
 if 'm_df' not in st.session_state:
@@ -39,6 +38,19 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
+# --- データのクリーンアップ関数 (バグ防止の要) ---
+def clean_all_data():
+    # シフト表のクリーンアップ
+    for col in ['シフト日数', '調整時間', '交通費']:
+        st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
+    st.session_state.shift_df['合計時間'] = (st.session_state.shift_df['シフト日数'] * 8.0) + st.session_state.shift_df['調整時間']
+    
+    # 実績表のクリーンアップ
+    if not st.session_state.sku_db.empty:
+        for col in ['実績SKU', '総カット数']:
+            st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0)
+
+clean_all_data()
 
 # --- 2. 画面構成 ---
 st.title("📸 rubyohoto 撮影収支管理")
@@ -63,7 +75,7 @@ with tab1:
     final['原価合計'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['原価合計']
 
-    # ★ 順番を強制的に「森、宇田、三沖、野澤」に固定
+    # 順序固定
     final['氏名'] = pd.Categorical(final['氏名'], categories=name_order, ordered=True)
     final = final.sort_values('氏名')
 
@@ -73,13 +85,11 @@ with tab1:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("総売上", f"¥{int(final['売上金額'].sum()):,}")
     m2.metric("合計利益", f"¥{int(final['利益'].sum()):,}")
-    m3.metric("チーム全体シフト", f"{total_shifts}日")
-    m4.metric("チーム全体調整時間", f"{total_adj:+.1f}h", delta=total_adj, delta_color="normal")
+    m3.metric("合計シフト", f"{total_shifts}日")
+    m4.metric("合計調整時間", f"{total_adj:+.1f}h", delta=total_adj)
 
     st.divider()
-    
-    # ★ 不要な調整時間グラフを削除し、利益グラフだけをスッキリ表示
-    st.subheader("💰 利益分布")
+    st.subheader("💰 利益分布 (森→宇田→三沖→野澤)")
     st.bar_chart(final.set_index('氏名')['利益'])
 
     st.subheader("📋 詳細レポートテーブル")
@@ -89,66 +99,60 @@ with tab1:
 
 # --- タブ2：コスト設定と実績入力 ---
 with tab2:
-    st.subheader("⏱️ カメラマン別：シフト＆調整時間 (+/-)")
-    names = name_order
-    cols = st.columns(len(names))
-    
+    st.subheader("⏱️ カメラマン別状況")
+    cols = st.columns(len(name_order))
     shift_calc = st.session_state.shift_df.groupby('名前').agg({'シフト日数': 'sum', '調整時間': 'sum', '合計時間': 'sum'}).reset_index()
     
-    for i, name in enumerate(names):
-        person_data = shift_calc[shift_calc['名前'] == name]
-        p_shift = person_data['シフト日数'].iloc[0] if not person_data.empty else 0
-        p_adj = person_data['調整時間'].iloc[0] if not person_data.empty else 0.0
-        p_total = person_data['合計時間'].iloc[0] if not person_data.empty else 0.0
-        cols[i].metric(label=f"👤 {name}", value=f"{p_total:.1f}h", delta=f"{p_adj:+.1f}h (調整)", delta_color="normal")
+    for i, name in enumerate(name_order):
+        p_data = shift_calc[shift_calc['名前'] == name]
+        p_total = p_data['合計時間'].iloc[0] if not p_data.empty else 0.0
+        p_adj = p_data['調整時間'].iloc[0] if not p_data.empty else 0.0
+        cols[i].metric(label=f"👤 {name}", value=f"{p_total:.1f}h", delta=f"{p_adj:+.1f}h")
 
     st.divider()
-
     st.subheader("❶ シフト・コスト設定")
-    
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], 
-        hide_index=True, 
-        key="sh_tab2_auto",
-        use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v9", use_container_width=True
     )
-
-    # 変更があった瞬間に即座に再計算して画面リロード
-    edit_cols = ["名前", "期間", "シフト日数", "調整時間", "交通費"]
-    if not edited_shift[edit_cols].equals(st.session_state.shift_df[edit_cols]):
-        for col in ['シフト日数', '調整時間', '交通費']:
-            edited_shift[col] = pd.to_numeric(edited_shift[col], errors='coerce').fillna(0)
-        # 8時間計算を強制実行
-        edited_shift['合計時間'] = (edited_shift['シフト日数'] * 8.0) + edited_shift['調整時間']
-        
+    if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
+        clean_all_data()
         st.rerun()
-
     
     st.divider()
     st.subheader("❷ 撮影実績入力")
     with st.container(border=True):
         c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 1])
         i_date = c1.date_input("撮影日")
-        i_name = c2.selectbox("カメラマン", names)
+        i_name = c2.selectbox("カメラマン", name_order)
         in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist())
         i_sku = c4.number_input("SKU数", min_value=0)
         i_cut = c5.number_input("総カット数", min_value=0)
         if st.button("実績を追加保存", use_container_width=True):
             new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": i_sku, "総カット数": i_cut}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True)
+            clean_all_data()
             st.rerun()
 
-    st.write("▼ 実績リスト")
-    st.session_state.sku_db = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_tab2_auto")
-
+    st.write("▼ 実績リスト (名前・ブランドは選択式でミス防止)")
+    # ★ ここで typo 防止の「選択式（column_config）」を導入！
+    st.session_state.sku_db = st.data_editor(
+        st.session_state.sku_db, 
+        num_rows="dynamic", 
+        use_container_width=True, 
+        key="sku_editor_v9",
+        column_config={
+            "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
+            "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)
+        }
+    )
 
 # --- タブ3：設定 ---
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_tab3_auto")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v9")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_tab3_auto")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v9")
