@@ -66,7 +66,6 @@ def create_pdf(df, sales, cost, profit, adj_time):
     pdf.ln(10)
     
     pdf.set_font("NotoSansJP", "", 10)
-    # カラム幅調整
     pdf.cell(25, 10, "氏名", 1); pdf.cell(15, 10, "SKU", 1); pdf.cell(18, 10, "調整", 1)
     pdf.cell(25, 10, "売上", 1); pdf.cell(25, 10, "人件費", 1); pdf.cell(25, 10, "利益", 1); pdf.cell(30, 10, "1日目安", 1); pdf.ln()
     
@@ -113,11 +112,9 @@ with tab1:
     final = pd.merge(st.session_state.m_df, sku_summary, on='氏名', how='left').fillna(0)
     final = pd.merge(final, shift_summary, on='氏名', how='left').fillna(0)
     
-    # ★「人件費」を明確に算出
     final['人件費'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['人件費']
 
-    # ★「1日何カット撮れば元が取れるか（損益分岐）」の計算
     def calc_breakeven(row):
         if row['総カット数'] > 0 and row['売上金額'] > 0:
             avg_price = row['売上金額'] / row['総カット数']
@@ -134,7 +131,6 @@ with tab1:
     total_adj = shift_summary['調整時間'].sum()
     total_shifts = shift_summary['シフト日数'].sum()
 
-    # ★ パネルに「人件費」を追加し、見やすく5列に
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("総売上 (請求額)", f"¥{int(final['売上金額'].sum()):,}")
     m2.metric("総人件費 (コスト)", f"¥{int(final['人件費'].sum()):,}")
@@ -143,11 +139,14 @@ with tab1:
     m5.metric("合計調整時間", f"{total_adj:+.1f}h", delta=total_adj)
 
     st.divider()
+    
+    # ★ 利益グラフ：マイナスなら赤、プラスなら青に自動判定
     st.subheader("💰 利益分布")
-    st.bar_chart(final.set_index('氏名')['利益'])
+    chart_df = final[['氏名', '利益']].copy()
+    chart_df['グラフ色'] = chart_df['利益'].apply(lambda x: '#FF4B4B' if x < 0 else '#0068C9')
+    st.bar_chart(chart_df, x='氏名', y='利益', color='グラフ色')
 
     st.subheader("📋 詳細レポートテーブル")
-    # ★ テーブルのカラムにも「人件費」と「損益分岐」を追加
     disp_df = final[['氏名', '実績SKU', '総カット数', 'シフト日数', '合計時間', '調整時間', '売上金額', '人件費', '利益', '損益分岐']].rename(columns={'売上金額':'売上'})
     
     st.dataframe(disp_df.style.format({
@@ -181,7 +180,7 @@ with tab2:
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v13", use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v14", use_container_width=True
     )
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
@@ -206,7 +205,7 @@ with tab2:
 
     st.write("▼ 実績リスト")
     st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v13",
+        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v14",
         column_config={
             "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
             "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
@@ -219,6 +218,6 @@ with tab2:
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v13")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v14")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v13")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v14")
