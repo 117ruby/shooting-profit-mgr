@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from fpdf import FPDF
-import io
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
@@ -38,20 +36,21 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
+
 # --- 2. 画面構成 ---
 st.title("📸 rubyohoto 撮影収支管理")
 
 tab1, tab2, tab3 = st.tabs(["📉 収支・時間集計", "📝 実績入力・コスト設定", "⚙️ 各種設定"])
 
+
 # --- タブ1：収支・時間集計 ---
 with tab1:
     st.header("📊 総合レポート")
 
-    # ❶ 【最優先】時間とシフトの合計を算出（実績の有無に関係なく出す！）
-    total_adj = st.session_state.shift_df['調整時間'].sum()
-    total_shifts = st.session_state.shift_df['シフト日数'].sum()
+    # 重複バグ回避
+    m_clean = st.session_state.m_df.drop_duplicates(subset=['氏名'])
+    s_clean = st.session_state.shift_df.drop_duplicates(subset=['氏名'])
 
-    # ❷ 売上・利益の計算
     if not st.session_state.sku_db.empty:
         calc_df = pd.merge(st.session_state.sku_db, st.session_state.b_df, left_on="ブランド", right_on="ブランド名", how="left")
         calc_df['売上金額'] = calc_df['総カット数'] * calc_df['カット単価'].fillna(0)
@@ -59,22 +58,22 @@ with tab1:
     else:
         summary = pd.DataFrame(columns=['氏名', '実績SKU', '総カット数', '売上金額'])
 
-    final = pd.merge(st.session_state.m_df, summary, on='氏名', how='left').fillna(0)
-    final = pd.merge(final, st.session_state.shift_df[['氏名', 'シフト日数', '調整時間', '交通費']], on='氏名', how='left').fillna(0)
+    final = pd.merge(m_clean, summary, on='氏名', how='left').fillna(0)
+    final = pd.merge(final, s_clean[['氏名', 'シフト日数', '調整時間', '交通費']], on='氏名', how='left').fillna(0)
     final['原価合計'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['原価合計']
 
-    # ❸ 【ここ重要】メトリクスを一番上に固定表示
+    total_adj = s_clean['調整時間'].sum()
+    total_shifts = s_clean['シフト日数'].sum()
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("総売上", f"¥{int(final['売上金額'].sum()):,}")
     m2.metric("合計利益", f"¥{int(final['利益'].sum()):,}")
     m3.metric("合計シフト", f"{total_shifts}日")
-    # 合計調整時間を +/- 付きでデカデカと表示
     m4.metric("合計調整時間", f"{total_adj:+.1f}h", delta=total_adj, delta_color="normal")
 
     st.divider()
 
-    # グラフと詳細
     c_l, c_r = st.columns(2)
     with c_l:
         st.write("💰 利益分布")
@@ -87,11 +86,23 @@ with tab1:
     disp_df = final[['氏名', '実績SKU', '総カット数', 'シフト日数', '調整時間', '売上金額', '利益']].rename(columns={'売上金額':'売上'})
     st.dataframe(disp_df.style.format({"売上": "¥{:,.0f}", "利益": "¥{:,.0f}", "調整時間": "{:+.1f}h"}), use_container_width=True, hide_index=True)
 
+
 # --- タブ2：コスト設定と実績入力 ---
 with tab2:
+    # ★ ここがユーザー様の求めていた「タブ2への合計時間表示」です！
+    st.subheader("⏱️ 現在の合計シフト・調整時間")
+    t_adj = st.session_state.shift_df['調整時間'].sum()
+    t_shift = st.session_state.shift_df['シフト日数'].sum()
+    
+    col_t1, col_t2 = st.columns(2)
+    col_t1.metric("合計シフト", f"{t_shift}日")
+    col_t2.metric("合計調整時間", f"{t_adj:+.1f}h", delta=t_adj, delta_color="normal")
+
+    st.divider()
+
     st.subheader("❶ シフト・コスト設定（調整時間を入力）")
-    # ここに入力した +/- 2 などの数値が、タブ1の「合計調整時間」に即座に反映されます
-    st.session_state.shift_df = st.data_editor(st.session_state.shift_df, hide_index=True, key="sh_v_final")
+    st.write("※ 表の数値を変更すると、すぐ上の「合計調整時間」にリアルタイムで反映されます。")
+    st.session_state.shift_df = st.data_editor(st.session_state.shift_df, hide_index=True, key="sh_tab2")
     
     st.divider()
     st.subheader("❷ 撮影実績入力")
@@ -108,12 +119,13 @@ with tab2:
             st.rerun()
 
     st.write("▼ 実績リスト（修正・削除）")
-    st.session_state.sku_db = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v_final")
+    st.session_state.sku_db = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_tab2")
+
 
 # --- タブ3：設定 ---
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v_final")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_tab3")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v_final")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_tab3")
