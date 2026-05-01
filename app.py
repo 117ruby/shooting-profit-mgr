@@ -68,7 +68,8 @@ def clean_all_data():
     st.session_state.shift_df['合計時間'] = (st.session_state.shift_df['シフト日数'] * 8.0) + st.session_state.shift_df['調整時間']
     if not st.session_state.sku_db.empty:
         for col in ['実績SKU', '総カット数']:
-            st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0)
+            # ★ ここで整数（int）に強制変換して小数点を消す
+            st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
 
 clean_all_data()
 
@@ -113,9 +114,17 @@ with tab1:
 
     st.subheader("📋 詳細レポートテーブル")
     disp_df = final[['氏名', '実績SKU', '総カット数', 'シフト日数', '合計時間', '調整時間', '売上金額', '利益']].rename(columns={'売上金額':'売上'})
-    st.dataframe(disp_df.style.format({"売上": "¥{:,.0f}", "利益": "¥{:,.0f}", "調整時間": "{:+.1f}h", "合計時間": "{:.1f}h"}), use_container_width=True, hide_index=True)
+    
+    # ★ ここでも小数点が出ないように表示形式を {:.0f} で完全にロックしました
+    st.dataframe(disp_df.style.format({
+        "売上": "¥{:,.0f}", 
+        "利益": "¥{:,.0f}", 
+        "調整時間": "{:+.1f}h", 
+        "合計時間": "{:.1f}h",
+        "実績SKU": "{:.0f}",
+        "総カット数": "{:.0f}"
+    }), use_container_width=True, hide_index=True)
 
-    # ★ ここにPDF保存ボタンを復活させました！
     if st.button("📄 レポートをPDFで保存"):
         pdf_bytes = create_pdf(disp_df, final['売上金額'].sum(), final['原価合計'].sum(), final['利益'].sum(), total_adj)
         st.download_button("📥 PDFダウンロード", pdf_bytes, f"report_{datetime.date.today()}.pdf", "application/pdf")
@@ -137,7 +146,7 @@ with tab2:
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
-        disabled=["合計時間"], hide_index=True, key="sh_editor_v10", use_container_width=True
+        disabled=["合計時間"], hide_index=True, key="sh_editor_v11", use_container_width=True
     )
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
@@ -151,20 +160,24 @@ with tab2:
         i_date = c1.date_input("撮影日")
         i_name = c2.selectbox("カメラマン", name_order)
         in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist())
-        i_sku = c4.number_input("SKU数", min_value=0)
-        i_cut = c5.number_input("総カット数", min_value=0)
+        # ★ 入力フォームも整数しか入らないように制限
+        i_sku = c4.number_input("SKU数", min_value=0, step=1)
+        i_cut = c5.number_input("総カット数", min_value=0, step=1)
+        
         if st.button("実績を追加保存", use_container_width=True):
-            new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": i_sku, "総カット数": i_cut}])
+            new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True)
             clean_all_data()
             st.rerun()
 
     st.write("▼ 実績リスト")
     st.session_state.sku_db = st.data_editor(
-        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v10",
+        st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_editor_v11",
         column_config={
             "氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True),
-            "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)
+            "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True),
+            "実績SKU": st.column_config.NumberColumn("実績SKU", step=1),
+            "総カット数": st.column_config.NumberColumn("総カット数", step=1)
         }
     )
 
@@ -172,6 +185,6 @@ with tab2:
 with tab3:
     ca, cb = st.columns(2)
     ca.subheader("👥 氏名・日給設定")
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v10")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v11")
     cb.subheader("🏷️ ブランド・単価設定")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v10")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v11")
