@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from fpdf import FPDF
-import io
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
 # --- 1. データの初期化 ---
+# ★ 順番をここで完全固定
+name_order = ["森さん", "宇田さん", "三沖さん", "野澤さん"]
+
 if 'm_df' not in st.session_state:
     st.session_state.m_df = pd.DataFrame([
         {"氏名": "森さん", "日給": 15000, "目標SKU": 15},
@@ -62,6 +63,10 @@ with tab1:
     final['原価合計'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['利益'] = final['売上金額'] - final['原価合計']
 
+    # ★ 順番を強制的に「森、宇田、三沖、野澤」に固定
+    final['氏名'] = pd.Categorical(final['氏名'], categories=name_order, ordered=True)
+    final = final.sort_values('氏名')
+
     total_adj = shift_summary['調整時間'].sum()
     total_shifts = shift_summary['シフト日数'].sum()
 
@@ -72,13 +77,10 @@ with tab1:
     m4.metric("チーム全体調整時間", f"{total_adj:+.1f}h", delta=total_adj, delta_color="normal")
 
     st.divider()
-    c_l, c_r = st.columns(2)
-    with c_l:
-        st.write("💰 利益分布")
-        st.bar_chart(final.set_index('氏名')['利益'])
-    with c_r:
-        st.write("⏳ 調整時間状況 (+/-)")
-        st.bar_chart(final.set_index('氏名')['調整時間'])
+    
+    # ★ 不要な調整時間グラフを削除し、利益グラフだけをスッキリ表示
+    st.subheader("💰 利益分布")
+    st.bar_chart(final.set_index('氏名')['利益'])
 
     st.subheader("📋 詳細レポートテーブル")
     disp_df = final[['氏名', '実績SKU', '総カット数', 'シフト日数', '合計時間', '調整時間', '売上金額', '利益']].rename(columns={'売上金額':'売上'})
@@ -88,7 +90,7 @@ with tab1:
 # --- タブ2：コスト設定と実績入力 ---
 with tab2:
     st.subheader("⏱️ カメラマン別：シフト＆調整時間 (+/-)")
-    names = st.session_state.m_df['氏名'].tolist()
+    names = name_order
     cols = st.columns(len(names))
     
     shift_calc = st.session_state.shift_df.groupby('名前').agg({'シフト日数': 'sum', '調整時間': 'sum', '合計時間': 'sum'}).reset_index()
@@ -104,7 +106,6 @@ with tab2:
 
     st.subheader("❶ シフト・コスト設定")
     
-    # ユーザーの入力を一旦別の変数（edited_shift）で受け取る
     edited_shift = st.data_editor(
         st.session_state.shift_df, 
         column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"],
@@ -114,7 +115,7 @@ with tab2:
         use_container_width=True
     )
 
-    # ★ 変更があった瞬間に即座に再計算して画面をリロードする絶対防御ロジック
+    # 変更があった瞬間に即座に再計算して画面リロード
     edit_cols = ["名前", "期間", "シフト日数", "調整時間", "交通費"]
     if not edited_shift[edit_cols].equals(st.session_state.shift_df[edit_cols]):
         for col in ['シフト日数', '調整時間', '交通費']:
@@ -122,7 +123,6 @@ with tab2:
         # 8時間計算を強制実行
         edited_shift['合計時間'] = (edited_shift['シフト日数'] * 8.0) + edited_shift['調整時間']
         
-        # データを更新して強制リロード
         st.session_state.shift_df = edited_shift
         st.rerun()
 
