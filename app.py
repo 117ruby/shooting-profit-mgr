@@ -6,7 +6,7 @@ import io
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
-# --- 1. データの初期化 (鉄の掟：並び順) ---
+# --- 1. データの初期化 (名前の順序と初期単価) ---
 name_order = ["森さん", "宇田さん", "三沖さん", "野澤さん"]
 
 if 'm_df' not in st.session_state:
@@ -21,7 +21,7 @@ if 'b_df' not in st.session_state:
     st.session_state.b_df = pd.DataFrame([
         {"ブランド名": "VW(モデル)", "カット単価": 2150},
         {"ブランド名": "VW(トルソー)", "カット単価": 3500},
-        {"ブランド名": "VW(雑貨)", "カット単価": 800}, # ← 追加しました！
+        {"ブランド名": "VW(雑貨)", "カット単価": 960}, # ← ¥960に修正しました！
         {"ブランド名": "MKOL", "カット単価": 1500},
         {"ブランド名": "DS", "カット単価": 700},
         {"ブランド名": "VAL", "カット単価": 1100},
@@ -41,7 +41,7 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- 2. データクリーンアップ ---
+# --- データ集計用関数 ---
 def clean_all_data():
     for col in ['シフト日数', '調整時間', '交通費']:
         st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
@@ -50,7 +50,7 @@ def clean_all_data():
         for col in ['実績SKU', '総カット数']:
             st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
 
-# --- 3. PDF作成 (型エラー回避済み) ---
+# --- PDF作成用関数 ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
@@ -73,17 +73,14 @@ def create_pdf(df, sales, cost, profit, adj_time):
         rp = int(row['利益'])
         if rp < 0: pdf.set_text_color(255, 75, 75)
         pdf.cell(35, 10, f"JPY {rp:+,}", 1, 1, 'R'); pdf.set_text_color(0, 0, 0)
-    
     output_raw = pdf.output(dest='S')
     return bytes(output_raw) if not isinstance(output_raw, str) else output_raw.encode('latin-1')
 
 clean_all_data()
 
-# --- 画面構成 ---
 st.title("📸 rubyohoto 撮影収支管理")
 tab1, tab2, tab3 = st.tabs(["📉 収支・時間集計", "📝 実績入力・コスト設定", "⚙️ 各種設定"])
 
-# --- タブ1：集計 ---
 with tab1:
     st.header("📊 総合レポート")
     s_merge = st.session_state.shift_df.rename(columns={'名前': '氏名'})
@@ -105,7 +102,6 @@ with tab1:
         return f"{(row['実績SKU'] / row['目標SKU合計']) * 100:.1f}%" if row['目標SKU合計'] > 0 else "0.0%"
     final['達成率'] = final.apply(calc_achievement, axis=1)
 
-    # 並び順固定
     final['氏名'] = pd.Categorical(final['氏名'], categories=name_order, ordered=True)
     final = final.sort_values('氏名')
     
@@ -128,13 +124,12 @@ with tab1:
         pdf_data = create_pdf(disp_df, final['売上金額'].sum(), final['人件費'].sum(), final['利益'].sum(), shift_summary['調整時間'].sum())
         st.download_button(label="📥 ダウンロード", data=pdf_data, file_name=f"report_{datetime.date.today()}.pdf", mime="application/pdf")
 
-# --- タブ2：実績入力 ---
 with tab2:
     st.subheader("❶ シフト・コスト設定")
     st.session_state.shift_df['名前'] = pd.Categorical(st.session_state.shift_df['名前'], categories=name_order, ordered=True)
     st.session_state.shift_df = st.session_state.shift_df.sort_values('名前')
     
-    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v25", use_container_width=True)
+    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v26", use_container_width=True)
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
         clean_all_data(); st.rerun()
@@ -147,21 +142,20 @@ with tab2:
             new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     
-    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v25", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
+    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v26", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
     if not edited_sku.equals(st.session_state.sku_db):
         st.session_state.sku_db = edited_sku
         clean_all_data(); st.rerun()
 
-# --- タブ3：設定 ---
 with tab3:
     st.header("💾 データのバックアップ・復元")
     col_a, col_b = st.columns(2)
     with col_a:
-        st.download_button(label="📥 撮影実績をCSVで保存", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name=f"rubyohoto_data_{datetime.date.today()}.csv", mime='text/csv')
+        st.download_button(label="📥 撮影実績を保存 (CSV)", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name=f"rubyohoto_data_{datetime.date.today()}.csv", mime='text/csv')
     with col_b:
         uploaded_file = st.file_uploader("保存したCSVファイルを読み込む", type="csv")
         if uploaded_file:
             st.session_state.sku_db = pd.read_csv(uploaded_file); clean_all_data(); st.success("読み込み完了！"); st.rerun()
     st.divider(); ca, cb = st.columns(2)
-    st.subheader("👥 氏名・日給設定"); st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v25")
-    st.subheader("🏷️ ブランド・単価設定"); st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v25")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v26")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v26")
