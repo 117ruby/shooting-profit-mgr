@@ -113,7 +113,6 @@ with tab1:
     final['会社利益'] = final['売上金額'] - final['人件費']
     final['目標SKU合計'] = final['目標SKU'] * final['シフト日数']
     final['SKU差分'] = final['実績SKU'] - final['目標SKU合計']
-    # ★ 1SKU単価（ノルマ単価）の可視化
     final['ノルマ単価'] = final.apply(lambda row: row['日給'] / row['目標SKU'] if row['目標SKU'] > 0 else 0, axis=1)
     final['稼働損益'] = (final['SKU差分'] * final['ノルマ単価']) - final['交通費']
     
@@ -130,7 +129,6 @@ with tab1:
         st.bar_chart(chart_df, x='氏名', y='稼働損益', color='色')
 
     st.subheader("📋 詳細レポート")
-    # ノルマ単価を列に加える
     disp_df = final[['氏名', 'ノルマ単価', '稼働損益', '実績SKU', '目標SKU合計', 'SKU差分', '人件費', '売上金額']].rename(columns={'売上金額':'参考売上'})
     st.dataframe(disp_df.style.format({
         "参考売上": "¥{:,.0f}", "人件費": "¥{:,.0f}", "稼働損益": lambda x: f"{int(x):+,}", 
@@ -139,7 +137,7 @@ with tab1:
 
     if st.button("📄 レポートPDF保存"):
         pdf_data = create_pdf(selected_period, final, final['売上金額'].sum(), final['人件費'].sum(), final['会社利益'].sum(), shift_summary['調整時間'].sum())
-        st.download_button(label="📥 ダウンロード", data=pdf_data, file_name=f"report_{selected_period}.pdf", mime="application/pdf")
+        st.download_button(label="📥 ダウンロード", data=pdf_data, file_name=f"report_{selected_period.replace('/','-').replace(' ','_')}.pdf", mime="application/pdf")
 
 with tab2:
     st.subheader(f"❶ シフト・コスト設定 ({selected_period})")
@@ -148,7 +146,7 @@ with tab2:
         f_shift = pd.DataFrame([{"名前": n, "期間": selected_period, "シフト日数": 0, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0} for n in name_order])
         st.session_state.shift_df = pd.concat([st.session_state.shift_df, f_shift], ignore_index=True)
     f_shift['名前'] = pd.Categorical(f_shift['名前'], categories=name_order, ordered=True)
-    edited_shift = st.data_editor(f_shift.sort_values('名前'), column_order=["名前", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v34", use_container_width=True)
+    edited_shift = st.data_editor(f_shift.sort_values('名前'), column_order=["名前", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v35", use_container_width=True)
     if not edited_shift.equals(f_shift.sort_values('名前')):
         edited_shift['期間'] = selected_period
         st.session_state.shift_df = pd.concat([st.session_state.shift_df[st.session_state.shift_df['期間'] != selected_period], edited_shift], ignore_index=True)
@@ -161,7 +159,7 @@ with tab2:
             new = pd.DataFrame([{"期間": selected_period, "日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     f_sku = st.session_state.sku_db[st.session_state.sku_db['期間'] == selected_period]
-    edited_sku = st.data_editor(f_sku, num_rows="dynamic", use_container_width=True, key="sku_v34")
+    edited_sku = st.data_editor(f_sku, num_rows="dynamic", use_container_width=True, key="sku_v35")
     if not edited_sku.equals(f_sku):
         edited_sku['期間'] = selected_period
         st.session_state.sku_db = pd.concat([st.session_state.sku_db[st.session_state.sku_db['期間'] != selected_period], edited_sku], ignore_index=True)
@@ -169,17 +167,30 @@ with tab2:
 
 with tab3:
     st.header("💾 バックアップ・各種設定")
+    
+    # ★ ここにアップロードを復活させました！！
+    st.info("ここで保存・読み込みを行うと、**すべての期間のデータ**が一括で処理されます。")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.download_button(label="📥 全データのバックアップを保存 (CSV)", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name=f"rubyohoto_all_data_{datetime.date.today()}.csv", mime='text/csv')
+    with col_b:
+        uploaded_file = st.file_uploader("保存したCSVファイルを読み込む", type="csv")
+        if uploaded_file:
+            st.session_state.sku_db = pd.read_csv(uploaded_file)
+            clean_all_data()
+            st.success("読み込み完了！")
+            st.rerun()
+
+    st.divider()
+
     ca, cb = st.columns(2)
     with ca:
         st.subheader("👥 氏名・日給設定")
-        st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v34")
-        # ★ ここに「1SKU単価（ノルマ単価）」の早見表を追加
+        st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v35")
         st.write("▼ 現在のノルマ単価（確認用）")
         calc_m = st.session_state.m_df.copy()
         calc_m['ノルマ単価'] = calc_m.apply(lambda r: f"¥{int(r['日給']/r['目標SKU']):,}/着" if r['目標SKU']>0 else "未設定", axis=1)
         st.dataframe(calc_m[['氏名', 'ノルマ単価']], hide_index=True, use_container_width=True)
     with cb:
         st.subheader("🏷️ ブランド・単価設定")
-        st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v34")
-    st.divider()
-    st.download_button(label="📥 全データをCSVで保存", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name="rubyohoto_backup.csv", mime='text/csv')
+        st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v35")
