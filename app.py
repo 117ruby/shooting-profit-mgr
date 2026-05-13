@@ -51,7 +51,7 @@ def clean_all_data():
         for col in ['実績SKU', '総カット数']:
             st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
 
-# --- 3. PDF作成 (改善版) ---
+# --- 3. PDF作成 (ステータス厳格化版) ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
@@ -84,7 +84,14 @@ def create_pdf(df, sales, cost, profit, adj_time):
         if rp < 0: pdf.set_text_color(255, 75, 75)
         pdf.cell(25, 10, f"{rp:+,}", 1, 0, 'R'); pdf.set_text_color(0, 0, 0)
         
-        status_txt = f"Need {row['ギャラ回収ライン']} more" if row['利益'] < 0 else "Cost Covered"
+        # PDF用の英語ステータス判定
+        if row['利益'] < 0:
+            status_txt = f"Need {row['ギャラ回収ライン']} more"
+        elif row['SKU差分'] < 0:
+            status_txt = "Cost Cov.(Missed)"
+        else:
+            status_txt = "Target Cleared!"
+            
         pdf.cell(45, 10, status_txt, 1, 1, 'C')
         
     output_raw = pdf.output(dest='S')
@@ -115,7 +122,6 @@ with tab1:
     final['目標SKU合計'] = final['目標SKU'] * final['シフト日数']
     final['SKU差分'] = final['実績SKU'] - final['目標SKU合計']
     
-    # ★ 「ギャラ回収ライン」：お給料分を稼ぐために最低限必要なSKU数
     def get_recovery_line(row):
         if row['利益'] >= 0: return 0
         if row['実績SKU'] > 0 and row['売上金額'] > 0:
@@ -123,7 +129,6 @@ with tab1:
             needed = math.ceil(abs(row['利益']) / avg_unit_price)
             return needed
         else:
-            # 実績がまだ無い場合、一律1,500円（適当な平均単価）で仮計算
             return math.ceil(row['人件費'] / 1500)
     
     final['ギャラ回収ライン'] = final.apply(get_recovery_line, axis=1)
@@ -148,8 +153,17 @@ with tab1:
     st.bar_chart(chart_df, x='氏名', y='利益', color='色')
     
     st.subheader("📋 詳細レポートテーブル")
-    # 状態列を追加
-    final['状態'] = final['利益'].apply(lambda x: "⚠️コスト割れ" if x < 0 else "✅達成")
+    
+    # ★ 状態の判定を厳密化
+    def get_status(row):
+        if row['SKU差分'] >= 0:
+            return "✅ 目標クリア"
+        elif row['利益'] >= 0:
+            return "🏃‍♂️ ペイ済(未達)"
+        else:
+            return "⚠️ コスト割れ"
+            
+    final['状態'] = final.apply(get_status, axis=1)
     
     disp_df = final[['氏名', '状態', '利益', '実績SKU', '目標SKU合計', 'SKU差分', '達成率', 'ギャラ回収ライン', '人件費', '売上金額']].rename(columns={'売上金額':'売上'})
     
@@ -168,7 +182,7 @@ with tab2:
     st.session_state.shift_df['名前'] = pd.Categorical(st.session_state.shift_df['名前'], categories=name_order, ordered=True)
     st.session_state.shift_df = st.session_state.shift_df.sort_values('名前')
     
-    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v27", use_container_width=True)
+    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v28", use_container_width=True)
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
         clean_all_data(); st.rerun()
@@ -181,7 +195,7 @@ with tab2:
             new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     
-    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v27", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
+    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v28", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
     if not edited_sku.equals(st.session_state.sku_db):
         st.session_state.sku_db = edited_sku
         clean_all_data(); st.rerun()
@@ -196,5 +210,5 @@ with tab3:
         if uploaded_file:
             st.session_state.sku_db = pd.read_csv(uploaded_file); clean_all_data(); st.success("読み込み完了！"); st.rerun()
     st.divider(); ca, cb = st.columns(2)
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v27")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v27")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v28")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v28")
