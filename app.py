@@ -51,7 +51,7 @@ def clean_all_data():
         for col in ['実績SKU', '総カット数']:
             st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
 
-# --- 3. PDF作成 (ステータス厳格化版) ---
+# --- 3. PDF作成 (ステータス見直し版) ---
 def create_pdf(df, sales, cost, profit, adj_time):
     pdf = FPDF()
     pdf.add_page()
@@ -84,13 +84,13 @@ def create_pdf(df, sales, cost, profit, adj_time):
         if rp < 0: pdf.set_text_color(255, 75, 75)
         pdf.cell(25, 10, f"{rp:+,}", 1, 0, 'R'); pdf.set_text_color(0, 0, 0)
         
-        # PDF用の英語ステータス判定
+        # ★ PDF用のステータスもポジティブに変更
         if row['利益'] < 0:
             status_txt = f"Need {row['ギャラ回収ライン']} more"
         elif row['SKU差分'] < 0:
-            status_txt = "Cost Cov.(Missed)"
+            status_txt = "Cost Covered" # 日給クリア
         else:
-            status_txt = "Target Cleared!"
+            status_txt = "Target Cleared!" # 完全達成
             
         pdf.cell(45, 10, status_txt, 1, 1, 'C')
         
@@ -137,6 +137,17 @@ with tab1:
         return f"{(row['実績SKU'] / row['目標SKU合計']) * 100:.1f}%" if row['目標SKU合計'] > 0 else "0.0%"
     final['達成率'] = final.apply(calc_achievement, axis=1)
 
+    # ★ 状態の判定を3段階に整理
+    def get_status(row):
+        if row['SKU差分'] >= 0:
+            return "👑 完全達成"
+        elif row['利益'] >= 0:
+            return "🆗 日給クリア"
+        else:
+            return "⚠️ コスト割れ"
+            
+    final['状態'] = final.apply(get_status, axis=1)
+
     final['氏名'] = pd.Categorical(final['氏名'], categories=name_order, ordered=True)
     final = final.sort_values('氏名')
     
@@ -148,22 +159,21 @@ with tab1:
     m5.metric("合計調整時間", f"{shift_summary['調整時間'].sum():+.1f}h")
     
     st.divider(); st.subheader("💰 利益分布")
-    chart_df = final[['氏名', '利益']].copy().sort_values('氏名')
-    chart_df['色'] = chart_df['利益'].apply(lambda x: '#FF4B4B' if x < 0 else '#0068C9')
+    chart_df = final[['氏名', '利益', '状態']].copy().sort_values('氏名')
+    
+    # ★ 状態に応じてグラフの色を分かりやすく変更
+    def get_bar_color(status):
+        if status == "👑 完全達成":
+            return '#0068C9' # 青（最高）
+        elif status == "🆗 日給クリア":
+            return '#28A745' # 緑（会社に損はさせてない、一安心）
+        else:
+            return '#FF4B4B' # 赤（赤字・要テコ入れ）
+
+    chart_df['色'] = chart_df['状態'].apply(get_bar_color)
     st.bar_chart(chart_df, x='氏名', y='利益', color='色')
     
     st.subheader("📋 詳細レポートテーブル")
-    
-    # ★ 状態の判定を厳密化
-    def get_status(row):
-        if row['SKU差分'] >= 0:
-            return "✅ 目標クリア"
-        elif row['利益'] >= 0:
-            return "🏃‍♂️ ペイ済(未達)"
-        else:
-            return "⚠️ コスト割れ"
-            
-    final['状態'] = final.apply(get_status, axis=1)
     
     disp_df = final[['氏名', '状態', '利益', '実績SKU', '目標SKU合計', 'SKU差分', '達成率', 'ギャラ回収ライン', '人件費', '売上金額']].rename(columns={'売上金額':'売上'})
     
@@ -182,7 +192,7 @@ with tab2:
     st.session_state.shift_df['名前'] = pd.Categorical(st.session_state.shift_df['名前'], categories=name_order, ordered=True)
     st.session_state.shift_df = st.session_state.shift_df.sort_values('名前')
     
-    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v28", use_container_width=True)
+    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v30", use_container_width=True)
     if not edited_shift.equals(st.session_state.shift_df):
         st.session_state.shift_df = edited_shift
         clean_all_data(); st.rerun()
@@ -195,7 +205,7 @@ with tab2:
             new = pd.DataFrame([{"日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     
-    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v28", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
+    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v30", column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
     if not edited_sku.equals(st.session_state.sku_db):
         st.session_state.sku_db = edited_sku
         clean_all_data(); st.rerun()
@@ -210,5 +220,5 @@ with tab3:
         if uploaded_file:
             st.session_state.sku_db = pd.read_csv(uploaded_file); clean_all_data(); st.success("読み込み完了！"); st.rerun()
     st.divider(); ca, cb = st.columns(2)
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v28")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v28")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v30")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v30")
