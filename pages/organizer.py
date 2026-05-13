@@ -29,12 +29,13 @@ def smart_organize_dropbox():
         dest_folder.mkdir(exist_ok=True)
         
         try:
+            # ダウンロードさせずに名前だけ書き換える魔法
             subprocess.run(["mv", str(file_path), str(dest_folder / filename)], check=True)
             moved_count += 1
         except Exception as e:
             print(f"Error moving {filename}: {e}")
 
-    messagebox.showinfo("完了", f"仕分け完了！\n移動したファイル: {moved_count}枚")
+    messagebox.showinfo("完了", f"仕分け完了！\n移動したファイル: {moved_count}枚\nDropboxの同期をお待ちください。")
 
 root = tk.Tk()
 root.withdraw()
