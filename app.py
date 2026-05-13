@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 from fpdf import FPDF
 import io
+import math
 
 st.set_page_config(page_title="rubyohoto 撮影収支", layout="wide")
 
@@ -30,23 +31,22 @@ if 'b_df' not in st.session_state:
         {"ブランド名": "MJ", "カット単価": 1850}
     ])
 
+# ★ 初期データを「前半」という名前に変更
 if 'shift_df' not in st.session_state:
     st.session_state.shift_df = pd.DataFrame([
-        {"名前": "森さん", "期間": "2026/05 第1期", "シフト日数": 6, "合計時間": 48.0, "調整時間": 0.0, "交通費": 816},
-        {"名前": "宇田さん", "期間": "2026/05 第1期", "シフト日数": 4, "合計時間": 32.0, "調整時間": 0.0, "交通費": 0},
-        {"名前": "三沖さん", "期間": "2026/05 第1期", "シフト日数": 3, "合計時間": 24.0, "調整時間": 0.0, "交通費": 0},
-        {"名前": "野澤さん", "期間": "2026/05 第1期", "シフト日数": 1, "合計時間": 8.0, "調整時間": 0.0, "交通費": 0}
+        {"名前": "森さん", "期間": "2026/05 前半", "シフト日数": 6, "合計時間": 48.0, "調整時間": 0.0, "交通費": 816},
+        {"名前": "宇田さん", "期間": "2026/05 前半", "シフト日数": 4, "合計時間": 32.0, "調整時間": 0.0, "交通費": 0},
+        {"名前": "三沖さん", "期間": "2026/05 前半", "シフト日数": 3, "合計時間": 24.0, "調整時間": 0.0, "交通費": 0},
+        {"名前": "野澤さん", "期間": "2026/05 前半", "シフト日数": 1, "合計時間": 8.0, "調整時間": 0.0, "交通費": 0}
     ])
 
-# ★ 実績DBに「期間」を追加
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["期間", "日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
 # --- 2. データクリーンアップ ---
 def clean_all_data():
-    # 古いCSVを読み込んだ際の互換性対応
     if not st.session_state.sku_db.empty and "期間" not in st.session_state.sku_db.columns:
-        st.session_state.sku_db.insert(0, "期間", "2026/05 第1期")
+        st.session_state.sku_db.insert(0, "期間", "2026/05 前半")
         
     for col in ['シフト日数', '調整時間', '交通費']:
         st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
@@ -96,21 +96,31 @@ def create_pdf(period_name, df, total_sales, total_cost, company_profit, adj_tim
 
 clean_all_data()
 
-# --- ★ サイドバー (期間フィルター) ---
-st.sidebar.title("📅 表示フィルター")
-available_periods = sorted(st.session_state.shift_df['期間'].unique().tolist())
-if not available_periods:
-    available_periods = ["2026/05 第1期"]
-selected_period = st.sidebar.selectbox("対象期間を選択", available_periods)
-st.sidebar.caption("※ここで選んだ期間のデータが「総合レポート」に集計され、実績入力にも反映されます。")
+# --- ★ サイドバー (期間の直感的な選択) ---
+st.sidebar.title("📅 対象期間の選択")
+st.sidebar.write("レポートや入力を行う期間を選んでください。")
 
+# 年月の選択
+sel_year = st.sidebar.number_input("年 (Year)", min_value=2024, max_value=2030, value=2026)
+sel_month = st.sidebar.selectbox("月 (Month)", [f"{i:02d}" for i in range(1, 13)], index=4) # 初期値は05
+
+# 前半・後半の選択
+sel_half = st.sidebar.radio("期間", ["前半 (1日〜15日)", "後半 (16日〜月末)"])
+period_str = "前半" if "前半" in sel_half else "後半"
+
+# 選択された期間の文字列を作成 (例: "2026/05 前半")
+selected_period = f"{sel_year}/{sel_month} {period_str}"
+
+st.sidebar.success(f"現在 **【 {selected_period} 】** のデータを表示・編集中です。")
+
+# --- メイン画面 ---
 st.title("📸 rubyohoto 撮影収支管理")
 tab1, tab2, tab3 = st.tabs(["📉 収支・時間集計", "📝 実績入力・コスト設定", "⚙️ 各種設定"])
 
 with tab1:
     st.header(f"📊 総合レポート ({selected_period})")
     
-    # ★ 選択された期間だけでフィルタリング
+    # 選択中の期間でデータを絞り込み
     f_shift = st.session_state.shift_df[st.session_state.shift_df['期間'] == selected_period]
     f_sku = st.session_state.sku_db[st.session_state.sku_db['期間'] == selected_period]
     
@@ -129,11 +139,9 @@ with tab1:
     
     final['人件費'] = (final['日給'] * final['シフト日数']) + final['交通費']
     final['会社利益'] = final['売上金額'] - final['人件費']
-    
     final['目標SKU合計'] = final['目標SKU'] * final['シフト日数']
     final['SKU差分'] = final['実績SKU'] - final['目標SKU合計']
     
-    # 目標が0の場合は単価計算エラーを防ぐ
     final['1SKU単価'] = final.apply(lambda row: row['日給'] / row['目標SKU'] if row['目標SKU'] > 0 else 0, axis=1)
     final['稼働損益'] = (final['SKU差分'] * final['1SKU単価']) - final['交通費']
     
@@ -162,14 +170,13 @@ with tab1:
     m4.metric("合計シフト", f"{int(shift_summary['シフト日数'].sum())}日")
     
     st.divider(); st.subheader("📊 個人の稼働損益（SKUベースの評価）")
-    st.caption("※ブランド単価は関係ありません。「日給に見合ったSKUを撮れているか」の純粋な評価額です。")
     
     chart_df = final[final['状態'] != "➖ シフトなし"][['氏名', '稼働損益', '状態']].copy().sort_values('氏名')
     if not chart_df.empty:
         chart_df['色'] = chart_df['状態'].apply(lambda x: '#0068C9' if "クリア" in x else '#FF4B4B')
         st.bar_chart(chart_df, x='氏名', y='稼働損益', color='色')
     else:
-        st.info("この期間のシフトデータはありません。")
+        st.info("この期間のシフトデータはまだありません。「実績入力・コスト設定」タブでシフトを設定してください。")
     
     st.subheader("📋 詳細レポートテーブル")
     disp_df = final[['氏名', '状態', '稼働損益', '実績SKU', '目標SKU合計', 'SKU差分', '達成率', '人件費', '売上金額']].rename(columns={'売上金額':'参考売上'})
@@ -181,45 +188,59 @@ with tab1:
     
     if st.button("📄 レポートをPDFで保存"):
         pdf_data = create_pdf(selected_period, final, final['売上金額'].sum(), final['人件費'].sum(), final['会社利益'].sum(), shift_summary['調整時間'].sum())
-        st.download_button(label="📥 PDFダウンロード", data=pdf_data, file_name=f"report_{datetime.date.today()}.pdf", mime="application/pdf")
+        st.download_button(label="📥 PDFダウンロード", data=pdf_data, file_name=f"report_{selected_period.replace('/','-').replace(' ','_')}.pdf", mime="application/pdf")
 
 with tab2:
-    st.subheader("❶ シフト・コスト設定")
-    st.write("💡 新しい期間を追加する場合は、表の一番下（灰色の行）に入力してください。自動的にサイドバーの選択肢に追加されます。")
+    st.subheader(f"❶ シフト・コスト設定 ({selected_period})")
     
-    st.session_state.shift_df['名前'] = pd.Categorical(st.session_state.shift_df['名前'], categories=name_order, ordered=True)
-    st.session_state.shift_df = st.session_state.shift_df.sort_values(['期間', '名前'])
+    # 選択中の期間のシフトデータだけを抽出
+    f_shift = st.session_state.shift_df[st.session_state.shift_df['期間'] == selected_period]
     
-    # ★ num_rows="dynamic" を復活させ、行の追加・削除を可能にしました！
-    edited_shift = st.data_editor(st.session_state.shift_df, column_order=["名前", "期間", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, num_rows="dynamic", key="sh_v32", use_container_width=True)
-    if not edited_shift.equals(st.session_state.shift_df):
-        st.session_state.shift_df = edited_shift
+    # まだデータがない（新しい期間を選んだ）場合は、4人分の空の行を自動作成する親切設計
+    if f_shift.empty:
+        init_data = [{"名前": n, "期間": selected_period, "シフト日数": 0, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0} for n in name_order]
+        f_shift = pd.DataFrame(init_data)
+        st.session_state.shift_df = pd.concat([st.session_state.shift_df, f_shift], ignore_index=True)
+    
+    f_shift['名前'] = pd.Categorical(f_shift['名前'], categories=name_order, ordered=True)
+    f_shift = f_shift.sort_values('名前')
+    
+    # 期間カラムは固定なので非表示にしてスッキリさせる
+    edited_shift = st.data_editor(f_shift, column_order=["名前", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v33", use_container_width=True)
+    
+    # 編集されたら、全体のデータフレームを更新
+    if not edited_shift.equals(f_shift):
+        edited_shift['期間'] = selected_period # 期間を補完
+        other_shifts = st.session_state.shift_df[st.session_state.shift_df['期間'] != selected_period]
+        st.session_state.shift_df = pd.concat([other_shifts, edited_shift], ignore_index=True)
         clean_all_data(); st.rerun()
     
-    st.divider(); st.subheader("❷ 撮影実績入力")
+    st.divider(); st.subheader(f"❷ 撮影実績入力 ({selected_period})")
     with st.container(border=True):
-        st.write(f"**【{selected_period}】の実績として追加** (※左のメニューで期間を変更できます)")
         c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 1, 1])
         i_date = c1.date_input("撮影日"); i_name = c2.selectbox("カメラマン", name_order); in_brand = c3.selectbox("ブランド", st.session_state.b_df["ブランド名"].tolist()); i_sku = c4.number_input("実績SKU", min_value=0, step=1); i_cut = c5.number_input("総カット数", min_value=0, step=1)
         if st.button("実績を追加保存", use_container_width=True):
             new = pd.DataFrame([{"期間": selected_period, "日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     
-    # ★ 実績リストにも期間カラムを追加し、追加・削除を可能に
-    edited_sku = st.data_editor(st.session_state.sku_db, num_rows="dynamic", use_container_width=True, key="sku_v32", column_order=["期間", "日付", "氏名", "ブランド", "実績SKU", "総カット数"], column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
-    if not edited_sku.equals(st.session_state.sku_db):
-        st.session_state.sku_db = edited_sku
+    f_sku = st.session_state.sku_db[st.session_state.sku_db['期間'] == selected_period]
+    edited_sku = st.data_editor(f_sku, num_rows="dynamic", use_container_width=True, key="sku_v33", column_order=["日付", "氏名", "ブランド", "実績SKU", "総カット数"], column_config={"氏名": st.column_config.SelectboxColumn("氏名", options=name_order, required=True), "ブランド": st.column_config.SelectboxColumn("ブランド", options=st.session_state.b_df["ブランド名"].tolist(), required=True)})
+    if not edited_sku.equals(f_sku):
+        edited_sku['期間'] = selected_period
+        other_skus = st.session_state.sku_db[st.session_state.sku_db['期間'] != selected_period]
+        st.session_state.sku_db = pd.concat([other_skus, edited_sku], ignore_index=True)
         clean_all_data(); st.rerun()
 
 with tab3:
     st.header("💾 データのバックアップ・復元")
+    st.info("ここで保存・読み込みを行うと、**すべての期間のデータ**が一括で処理されます。")
     col_a, col_b = st.columns(2)
     with col_a:
-        st.download_button(label="📥 撮影実績をCSVで保存", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name=f"rubyohoto_data_{datetime.date.today()}.csv", mime='text/csv')
+        st.download_button(label="📥 全データのバックアップを保存 (CSV)", data=st.session_state.sku_db.to_csv(index=False).encode('utf-8-sig'), file_name=f"rubyohoto_all_data_{datetime.date.today()}.csv", mime='text/csv')
     with col_b:
         uploaded_file = st.file_uploader("保存したCSVファイルを読み込む", type="csv")
         if uploaded_file:
             st.session_state.sku_db = pd.read_csv(uploaded_file); clean_all_data(); st.success("読み込み完了！"); st.rerun()
     st.divider(); ca, cb = st.columns(2)
-    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v32")
-    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v32")
+    st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v33")
+    st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v33")
