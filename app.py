@@ -42,11 +42,16 @@ if 'shift_df' not in st.session_state:
 if 'sku_db' not in st.session_state:
     st.session_state.sku_db = pd.DataFrame(columns=["期間", "日付", "氏名", "ブランド", "実績SKU", "総カット数"])
 
-# --- 2. データ集計ロジック ---
+# --- 2. データ集計ロジック (★ 旧CSV互換の安全装置を完全復活) ---
 def clean_all_data():
+    # 古いCSVデータ（期間カラムがない時代）を読み込んだ時の救済処置
+    if not st.session_state.sku_db.empty and "期間" not in st.session_state.sku_db.columns:
+        st.session_state.sku_db.insert(0, "期間", "2026/05 前半")
+        
     for col in ['シフト日数', '調整時間', '交通費']:
         st.session_state.shift_df[col] = pd.to_numeric(st.session_state.shift_df[col], errors='coerce').fillna(0)
     st.session_state.shift_df['合計時間'] = (st.session_state.shift_df['シフト日数'] * 8.0) + st.session_state.shift_df['調整時間']
+    
     if not st.session_state.sku_db.empty:
         for col in ['実績SKU', '総カット数']:
             st.session_state.sku_db[col] = pd.to_numeric(st.session_state.sku_db[col], errors='coerce').fillna(0).astype(int)
@@ -146,7 +151,7 @@ with tab2:
         f_shift = pd.DataFrame([{"名前": n, "期間": selected_period, "シフト日数": 0, "合計時間": 0.0, "調整時間": 0.0, "交通費": 0} for n in name_order])
         st.session_state.shift_df = pd.concat([st.session_state.shift_df, f_shift], ignore_index=True)
     f_shift['名前'] = pd.Categorical(f_shift['名前'], categories=name_order, ordered=True)
-    edited_shift = st.data_editor(f_shift.sort_values('名前'), column_order=["名前", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v35", use_container_width=True)
+    edited_shift = st.data_editor(f_shift.sort_values('名前'), column_order=["名前", "シフト日数", "合計時間", "調整時間", "交通費"], disabled=["合計時間"], hide_index=True, key="sh_v36", use_container_width=True)
     if not edited_shift.equals(f_shift.sort_values('名前')):
         edited_shift['期間'] = selected_period
         st.session_state.shift_df = pd.concat([st.session_state.shift_df[st.session_state.shift_df['期間'] != selected_period], edited_shift], ignore_index=True)
@@ -159,7 +164,7 @@ with tab2:
             new = pd.DataFrame([{"期間": selected_period, "日付": str(i_date), "氏名": i_name, "ブランド": in_brand, "実績SKU": int(i_sku), "総カット数": int(i_cut)}])
             st.session_state.sku_db = pd.concat([st.session_state.sku_db, new], ignore_index=True); clean_all_data(); st.rerun()
     f_sku = st.session_state.sku_db[st.session_state.sku_db['期間'] == selected_period]
-    edited_sku = st.data_editor(f_sku, num_rows="dynamic", use_container_width=True, key="sku_v35")
+    edited_sku = st.data_editor(f_sku, num_rows="dynamic", use_container_width=True, key="sku_v36")
     if not edited_sku.equals(f_sku):
         edited_sku['期間'] = selected_period
         st.session_state.sku_db = pd.concat([st.session_state.sku_db[st.session_state.sku_db['期間'] != selected_period], edited_sku], ignore_index=True)
@@ -167,8 +172,6 @@ with tab2:
 
 with tab3:
     st.header("💾 バックアップ・各種設定")
-    
-    # ★ ここにアップロードを復活させました！！
     st.info("ここで保存・読み込みを行うと、**すべての期間のデータ**が一括で処理されます。")
     col_a, col_b = st.columns(2)
     with col_a:
@@ -177,8 +180,8 @@ with tab3:
         uploaded_file = st.file_uploader("保存したCSVファイルを読み込む", type="csv")
         if uploaded_file:
             st.session_state.sku_db = pd.read_csv(uploaded_file)
-            clean_all_data()
-            st.success("読み込み完了！")
+            clean_all_data() # ここで互換性の処理が走り、エラーを防ぎます
+            st.success("✅ 読み込み完了！古いデータは自動的に「2026/05 前半」として復元されました。")
             st.rerun()
 
     st.divider()
@@ -186,11 +189,11 @@ with tab3:
     ca, cb = st.columns(2)
     with ca:
         st.subheader("👥 氏名・日給設定")
-        st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v35")
+        st.session_state.m_df = st.data_editor(st.session_state.m_df, hide_index=True, key="m_v36")
         st.write("▼ 現在のノルマ単価（確認用）")
         calc_m = st.session_state.m_df.copy()
         calc_m['ノルマ単価'] = calc_m.apply(lambda r: f"¥{int(r['日給']/r['目標SKU']):,}/着" if r['目標SKU']>0 else "未設定", axis=1)
         st.dataframe(calc_m[['氏名', 'ノルマ単価']], hide_index=True, use_container_width=True)
     with cb:
         st.subheader("🏷️ ブランド・単価設定")
-        st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v35")
+        st.session_state.b_df = st.data_editor(st.session_state.b_df, hide_index=True, key="b_v36")
