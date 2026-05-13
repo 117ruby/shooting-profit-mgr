@@ -22,7 +22,7 @@ def normalize(text):
     return re.sub(r'[^A-Z0-9]', '', str(text).upper())
 
 st.title("📦 VW撮影データ仕分けツール")
-st.write("画像をアップロードするだけで、トルソーとモデル(`_m_`)を**同じ品番フォルダ**に自動でまとめます。")
+st.write("画像をアップロードするだけで、トルソーとモデル(`_M_`)を**同じ品番フォルダ**に自動でまとめます。")
 st.divider()
 
 # --- 1. アップロードエリア ---
@@ -80,7 +80,7 @@ if image_files:
                     model_id = row[18].strip()
 
                     if not torso_id: continue
-                    folder_name = torso_id.rstrip('_')
+                    folder_name = torso_id.rstrip('_').replace("-", "_") # フォルダ名も_に統一
                     move_rules[normalize(torso_id)] = folder_name
                     if model_id:
                         move_rules[normalize(model_id)] = folder_name
@@ -113,17 +113,20 @@ if image_files:
                     filename = file.name
                     name_part = os.path.splitext(filename)[0]
                     
-                    # 例: 「12345_m_1」の中の「_m_」や「_M_」を「_」に変換する
-                    # すると「12345_1」になるので、モデルとトルソーが同じ形になる！
-                    clean_name = name_part.replace("_m_", "_").replace("_M_", "_")
-                    parts = clean_name.split('_')
+                    # 1. 邪魔なハイフン(-)をアンダーバー(_)に変換して統一する
+                    clean_name = name_part.replace("-", "_")
                     
-                    # 一番後ろの連番（_1 など）を削ったものを品番(フォルダ名)とする
+                    # 2. モデルの目印(_m_ や _M_)をただのアンダーバー(_)にしてトルソーの形に寄せる
+                    clean_name = clean_name.replace("_m_", "_").replace("_M_", "_")
+                    
+                    # 3. 末尾の連番(_1, _2など)をカットして品番フォルダ名にする
+                    parts = clean_name.split('_')
                     if len(parts) > 1:
                         folder_name = "_".join(parts[:-1])
                     else:
                         folder_name = clean_name
                     
+                    # ZIP内に保存（完成したフォルダ名の中に入れる）
                     zip_path = f"仕分け結果/{folder_name}/{filename}"
                     zip_file.writestr(zip_path, file.read())
                     moved_count += 1
